@@ -5,7 +5,10 @@ from geopy.geocoders import Nominatim
 from datetime import datetime, timedelta
 import joblib
 import pandas as pd
+import mysql.connector
+from flask_bcrypt import Bcrypt
 app = Flask(__name__)
+bcrypt = Bcrypt(app)
 CORS(app)
 geolocator = Nominatim(user_agent="flood_monitoring_app")
 API_KEY = 'ede1f9002e7a44558da162543242312'
@@ -14,6 +17,78 @@ WEATHER_API_URL = "http://api.weatherapi.com/v1/forecast.json"
 model = joblib.load("flood_prediction_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
+db_config = {
+    'host': 'localhost',        
+    'port': 3306,               
+    'user': 'root',
+    'password': 'thanh0123456789',
+    'database': 'flood_monitoring'
+}
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    try:
+        data = request.get_json()
+        username = data.get("username")
+        password = data.get("password")
+
+        if not username or not password:
+            return jsonify({"success": False, "error": "Username and password are required"}), 400
+
+        # Connect to the database
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Query user data
+        cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+        user = cursor.fetchone()
+
+        if not user or not bcrypt.check_password_hash(user["password_hash"], password):
+            return jsonify({"success": False, "error": "Invalid username or password"}), 401
+
+        # Close the connection
+        cursor.close()
+        conn.close()
+
+        return jsonify({"success": True}), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+@app.route('/api/add-user', methods=['POST'])
+def add_user():
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+
+        if not username or not password:
+            return jsonify({'error': 'Username and password are required'}), 400
+
+        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+
+        connection = mysql.connector.connect(**db_config)
+        cursor = connection.cursor()
+
+        query = "INSERT INTO users (username, password_hash) VALUES (%s, %s)"
+        cursor.execute(query, (username, hashed_password))
+        connection.commit()
+
+        return jsonify({'message': 'User added successfully'}), 201
+
+    except mysql.connector.Error as err:
+        if err.errno == 1062:  # Duplicate entry
+            return jsonify({'error': 'Username already exists'}), 409
+        return jsonify({'error': f'Database error: {err}'}), 500
+
+    except Exception as e:
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+
+    finally:
+        if 'cursor' in locals() and cursor:
+            cursor.close()
+        if 'connection' in locals() and connection.is_connected():
+            connection.close()
 
 def get_coordinates(city_name):
     location = geolocator.geocode(city_name + ", Vietnam")
@@ -88,20 +163,14 @@ def weather_forecast():
     
 @app.route("/api/predict-flood", methods=["POST"])
 def predict_flood():
-    # Nhận dữ liệu từ front-end
     data = request.get_json()
     rainfall_mm = data.get("rainfall_mm")
-
     if rainfall_mm is None:
         return jsonify({"error": "Missing rainfall_mm parameter"}), 400
 
-    # Tạo DataFrame với tên cột để phù hợp với scaler
     rainfall_df = pd.DataFrame([[rainfall_mm]], columns=["rainfall_mm"])
-    
-    # Chuẩn hóa dữ liệu
     rainfall_scaled = scaler.transform(rainfall_df)
-    
-    # Dự đoán
+
     prediction = model.predict(rainfall_scaled)[0]
     probability = model.predict_proba(rainfall_scaled)[0][1]
 

@@ -1,17 +1,30 @@
 <template>
   <div id="app">
-    <FloodData />
+    <Login v-if="!isLoggedIn" @loginSuccess="handleLoginSuccess" />
+    <FloodData v-else />
   </div>
 </template>
 
 <script>
-import FloodData from './components/FloodData.vue';
+import Login from "./components/Login.vue";
+import FloodData from "./components/FloodData.vue";
 
 export default {
-  name: 'App',
+  name: "App",
   components: {
-    FloodData
-  }
+    Login,
+    FloodData,
+  },
+  data() {
+    return {
+      isLoggedIn: false,
+    };
+  },
+  methods: {
+    handleLoginSuccess() {
+      this.isLoggedIn = true;
+    },
+  },
 };
 </script>
 
